@@ -57,15 +57,14 @@ public:
 	//
 	//워커스레드 1루프 종료 후
 	virtual VOID OnWorkerThreadEnd();
-
-	virtual VOID OnError() = 0;
-
-public:
-	SOCKET mListenSocket;
+	
 	UINT64 acceptCount = 0;
 	UINT64 acceptTPS = 0;
 	UINT64 recvTPS = 0;
 	UINT64 sendTPS = 0;
+
+private:
+	SOCKET mListenSocket;
 	UINT64 mCurrentClientCount;
 	UINT64 mClientID;
 	INT mMaxClientNum;
