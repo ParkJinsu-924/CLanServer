@@ -16,6 +16,7 @@
 #include "CSerializationBufferLan\CSerializationBufferLan.h"
 #include "CLockFreeQueue\LockFreeQueue.h"
 #include "CLockFreeStack\LockFreeStack.h"
+#include "CPerformanceProfiler/PerformanceProfiler.h"
 
 #define MAXWSABUF 200
 
@@ -23,7 +24,7 @@ class CLanServer
 {
 public:
 	CLanServer();
-	//오픈 ip, 포트, 워커스레트 수, 네이글 옵션, 최대접속자 수
+
 	BYTE Start(const WCHAR* openIP, SHORT port, INT workerThreadRunNum, INT workerThreadCreateNum, BYTE nagleOption, INT maxClientNum);
 	
 	BYTE SendPacket(UINT64, CSerializationBuffer*);
@@ -64,16 +65,6 @@ public:
 	UINT64 sendTPS = 0;
 
 private:
-	SOCKET mListenSocket;
-	UINT64 mCurrentClientCount;
-	UINT64 mClientID;
-	INT mMaxClientNum;
-	INT mWorkerThreadRunNum;
-	INT mWorkerThreadCreateNum;
-	SHORT mServerPort;
-	HANDLE mIocpHandle;
-	HANDLE* mThreadArr;
-
 	struct stIO_RELEASE
 	{
 		SHORT IOCount;
@@ -105,18 +96,29 @@ private:
 		USHORT length;
 	};
 #pragma pack()
+
+private:
+	SOCKET mListenSocket;
+	UINT64 mCurrentClientCount;
+	UINT64 mClientID;
+	INT mMaxClientNum;
+	INT mWorkerThreadRunNum;
+	INT mWorkerThreadCreateNum;
+	SHORT mServerPort;
+	HANDLE mIocpHandle;
+	HANDLE* mThreadArr;
+
 	LockFreeStack<INT> mSessionArrayIndexStack;
 	stSESSION* mSessionArray;
 
 	static UINT WINAPI StaticWorkerThread(PVOID p);
 	VOID WorkerThread();
 
-	VOID RecvProc(SHORT, stSESSION*);
-
-	VOID SendProc(stSESSION*);
-
 	static UINT WINAPI StaticAcceptThread(PVOID p);
 	VOID AcceptThread();
+	
+	VOID RecvProc(SHORT, stSESSION*);
+	VOID SendProc(stSESSION*);
 
 	VOID RecvPost(stSESSION*);
 	VOID SendPost(stSESSION*);

@@ -1,4 +1,7 @@
 #include "CLanServer.h"
+
+extern HANDLE hEvent;
+
 UINT WINAPI CLanServer::StaticWorkerThread(PVOID p)
 {
 	CLanServer* pObj = (CLanServer*)p;
@@ -57,7 +60,6 @@ VOID CLanServer::WorkerThread()
 			SendProc(pSession);
 		}
 
-
 	IOCOUNT_DEQ:
 		if (InterlockedDecrement16(&pSession->ioRelease.IOCount) == 0)
 		{
@@ -67,6 +69,54 @@ VOID CLanServer::WorkerThread()
 	}
 	return;
 }
+
+//VOID CLanServer::WorkerThread()
+//{
+//	for (;;)
+//	{
+//		stSESSION* pSession = nullptr;
+//		OVERLAPPED* pOverlapped = nullptr;
+//		DWORD transferredBytes = 0;
+//
+//		OVERLAPPED_ENTRY entry[50];
+//		ULONG removed;
+//		GetQueuedCompletionStatusEx(mIocpHandle, entry, _countof(entry), &removed, INFINITE, FALSE);
+//		
+//		for (int i = 0; i < removed; i++)
+//		{
+//			pOverlapped = entry[i].lpOverlapped;
+//			if (pOverlapped == nullptr)
+//			{
+//				PostQueuedCompletionStatus(mIocpHandle, NULL, NULL, NULL);
+//				break;
+//			}
+//
+//			pSession = (stSESSION*)entry[i].lpCompletionKey;
+//			transferredBytes = entry[i].dwNumberOfBytesTransferred;
+//
+//			if (transferredBytes == 0 || pOverlapped->Internal == ERROR_OPERATION_ABORTED)
+//			{
+//				goto IOCOUNT_DEQ;
+//			}
+//
+//			if (pOverlapped == &pSession->recvOverlapped)
+//			{
+//				RecvProc(transferredBytes, pSession);
+//			}
+//			else if (pOverlapped == &pSession->sendOverlapped)
+//			{
+//				SendProc(pSession);
+//			}
+//
+//		IOCOUNT_DEQ:
+//			if (InterlockedDecrement16(&pSession->ioRelease.IOCount) == 0)
+//			{
+//				ReleaseSession(pSession);
+//			}
+//		}
+//	}
+//	return;
+//}
 
 VOID CLanServer::RecvProc(SHORT transferredBytes, stSESSION* pSession)
 {
@@ -90,7 +140,6 @@ VOID CLanServer::RecvProc(SHORT transferredBytes, stSESSION* pSession)
 			Disconnect(pSession->sessionID);
 			break;
 		}
-
 		//뽑은 헤더를 통해서 패킷이 전부 도착했는지 확인하기
 		if (useSize - sizeof(header) < header.length)
 			break;
@@ -98,7 +147,7 @@ VOID CLanServer::RecvProc(SHORT transferredBytes, stSESSION* pSession)
 		//직렬화버퍼 Alloc하기
 		CSerializationBuffer* packet = CSerializationBuffer::Alloc();
 
-		//직렬화버퍼에 패킷을 전부 봅기
+		//직렬화버퍼에 패킷을 전부 뽑기
 		pSession->recvQ.Dequeue(packet->GetBufferPtr(), header.length + sizeof(header));
 
 		//디큐하여 뽑았으니 WritePos를 옮겨준다.
@@ -110,6 +159,7 @@ VOID CLanServer::RecvProc(SHORT transferredBytes, stSESSION* pSession)
 		//작업 완료 후 직렬화버퍼의 refCount를 감소하기
 		packet->DeqRef();
 	}
+
 	InterlockedIncrement64((LONG64*)&recvTPS);
 	RecvPost(pSession);
 }
@@ -130,100 +180,7 @@ VOID CLanServer::SendProc(stSESSION* pSession)
 	OnSend(pSession->sessionID);
 }
 
-//VOID CLanServer::WorkerThread()
-//{
-//	for (;;)
-//	{
-//		stSESSION* pSession = nullptr;
-//		OVERLAPPED* pOverlapped = nullptr;
-//		DWORD transferredBytes = 0;
-//
-//		OVERLAPPED_ENTRY entry[30];
-//		ULONG removed;
-//		//GetQueuedCompletionStatus(mIocpHandle, &transferredBytes, (PULONG_PTR)&pSession, &pOverlapped, INFINITE);
-//		GetQueuedCompletionStatusEx(mIocpHandle, entry, _countof(entry), &removed, INFINITE, FALSE);
-//
-//		for (int i = 0; i < removed; i++)
-//		{
-//			if (entry[i].lpOverlapped == nullptr)
-//			{
-//				PostQueuedCompletionStatus(mIocpHandle, NULL, NULL, NULL);
-//				break;
-//			}
-//
-//			pSession = (stSESSION*)entry[i].lpCompletionKey;
-//			transferredBytes = entry[i].dwNumberOfBytesTransferred;
-//
-//			if (entry[i].lpOverlapped == &pSession->recvOverlapped)
-//			{
-//				pSession->recvQ.MoveRear(transferredBytes);
-//
-//				for (;;)
-//				{
-//					stHEADER header;
-//
-//					int useSize = pSession->recvQ.GetUseSize();
-//
-//					//네트워크 헤더의 크기보다 작을 경우 break타고 다시 대기
-//					if (useSize < sizeof(header))
-//						break;
-//
-//					//Peek로 헤더 뽑고
-//					pSession->recvQ.Peek((char*)&header, sizeof(header));
-//
-//					//뽑은 헤더를 통해서 패킷이 전부 도착했는지 확인하기
-//					if (useSize - sizeof(header) < header.length)
-//						break;
-//
-//					//네티워크헤더를 제거하기
-//					pSession->recvQ.MoveFront(sizeof(header));
-//
-//					//직렬화버퍼 Alloc하기
-//					CSerializationBuffer* packet = CSerializationBuffer::Alloc();
-//
-//					//직렬화버퍼에 패킷을 전부 봅기
-//					pSession->recvQ.Dequeue(packet->GetContentBufPtr(), header.length);
-//
-//					//OnRecv호출을 통해 컨텐츠부분에 패킷 전달하기
-//					OnRecv(pSession->sessionID, packet);
-//
-//					//작업 완료 후 직렬화버퍼의 refCount를 감소하기
-//					packet->DeqRef();
-//				}
-//				RecvPost(pSession);
-//			}
-//			else if (entry[i].lpOverlapped == &pSession->sendOverlapped)
-//			{
-//				int sendCount = pSession->sendCount;
-//				//해당 세션에 대한 send플래그가 true 인 상태
-//				CSerializationBuffer* pBuf[MAXWSABUF];
-//
-//				pSession->sendQ.Dequeue((char*)pBuf, sizeof(nullptr) * sendCount);
-//
-//				for (int i = 0; i < sendCount; i++)
-//					pBuf[i]->DeqRef();
-//
-//				//pSession->sendFlag = false;
-//				InterlockedExchange8((char*)&pSession->sendFlag, false);
-//
-//				if (pSession->sendQ.GetUseSize() > 0)
-//					SendPost(pSession);
-//			}
-//			else
-//			{
-//				OnError();
-//			}
-//
-//		IOCOUNT_DEQ:
-//			if (InterlockedDecrement16(&pSession->ioRelease.IOCount) == 0)
-//			{
-//				OnClientLeave(pSession->sessionID);
-//				ReleaseSession(pSession);
-//			}
-//		}
-//	}
-//	return;
-//}
+
 
 VOID CLanServer::AcceptThread()
 {
@@ -235,6 +192,8 @@ VOID CLanServer::AcceptThread()
 
 		SOCKET clientSocket = accept(mListenSocket, (SOCKADDR*)&clientAddr, &size);
 		
+		SetEvent(hEvent);
+
 		acceptCount++;
 
 		acceptTPS++;
@@ -248,7 +207,6 @@ VOID CLanServer::AcceptThread()
 				continue;
 			else
 			{
-				printf("accept error. %d\n", errCode);
 				break;
 			}
 		}
@@ -310,7 +268,6 @@ VOID CLanServer::RecvPost(stSESSION* pSession)
 	DWORD recvQDirectEnqueueSize = pSession->recvQ.GetDirectEnqueueSize();
 
 	INT wsaBufCount = 1;
-
 	WSABUF dataBuf[2];
 
 	dataBuf[0].buf = pSession->recvQ.GetRearBufferPtr();
@@ -324,13 +281,9 @@ VOID CLanServer::RecvPost(stSESSION* pSession)
 	}
 
 	DWORD flags = 0;
-
 	ZeroMemory(&pSession->recvOverlapped, sizeof(pSession->recvOverlapped));
-	
 	InterlockedIncrement16(&pSession->ioRelease.IOCount);
-
 	INT retval = WSARecv(pSession->socket, dataBuf, wsaBufCount, NULL, &flags, &pSession->recvOverlapped, NULL);
-
 	if (retval == SOCKET_ERROR)
 	{
 		if (WSAGetLastError() == WSA_IO_PENDING)
@@ -346,7 +299,6 @@ VOID CLanServer::RecvPost(stSESSION* pSession)
 		}
 		else
 		{
-			// 소켓 연결 끊김
 			if (InterlockedDecrement16(&pSession->ioRelease.IOCount) == 0)
 			{
 				ReleaseSession(pSession);
@@ -369,8 +321,7 @@ BYTE CLanServer::SendPacket(UINT64 sessionID, CSerializationBuffer* packet)
 		return FALSE;
 
 	header.length = packet->GetContentUseSize();
-
-	packet->PutNetworkHeader((char*)&header, sizeof(header));
+	packet->PutNetworkHeader((CHAR*)&header, sizeof(header));
 
 	packet->AddRef();
 
@@ -379,8 +330,6 @@ BYTE CLanServer::SendPacket(UINT64 sessionID, CSerializationBuffer* packet)
 	pSession->sendQ.Enqueue(packet);
 
 	SendPost(pSession);
-
-
 	//useSize가 0이 나오는 상황을 고려해 SendPost를 한 번 더 호출하고있다.
 	if (pSession->sendQ.GetQueueSize() > 0)
 	{
@@ -450,7 +399,6 @@ VOID CLanServer::SendPost(stSESSION* pSession)
 		dataBuf[i].buf = pSession->sendPacketPtrBuf[i]->GetBufferPtr();
 		dataBuf[i].len = pSession->sendPacketPtrBuf[i]->GetTotalUseSize();
 	}
-
 	pSession->sendCount = useSize;
 
 	DWORD flags = 0;
@@ -458,9 +406,7 @@ VOID CLanServer::SendPost(stSESSION* pSession)
 	InterlockedIncrement16(&pSession->ioRelease.IOCount);
 
 	ZeroMemory(&pSession->sendOverlapped, sizeof(OVERLAPPED));
-
 	INT sendRetval = WSASend(pSession->socket, dataBuf, useSize, NULL, flags, &pSession->sendOverlapped, NULL);
-
 	if (sendRetval == SOCKET_ERROR)
 	{
 		if (WSAGetLastError() != WSA_IO_PENDING)
@@ -476,7 +422,6 @@ VOID CLanServer::SendPost(stSESSION* pSession)
 		{
 			if (pSession->socket == INVALID_SOCKET)
 			{
-				//I/O카운트의 감소는 ABORTED에서 이루어 질것이다.
 				CancelIoEx((HANDLE)pSession->socketForRelease, NULL);
 			}
 		}
@@ -554,7 +499,7 @@ BYTE CLanServer::AcquireSession(UINT64 sessionID, stSESSION* pSession)
 {
 	//IOCount를 증가시키는 순간 세션은 Release가 될일이 없음
 	//InterlockedIncrement를 통해 증가했을 때 0 -> 1 로 증가했다고 가정할 경우, Release된 세션임을 판단하면
-	//안되는 이유 = 여러 스레드에서 SendPacket을 동시에 호출했을 경우에 1이 아닌 2, 3, 4, 5 그 이상이 될수있다.
+	//안되는 이유 = 여러 스레드에서 SendPacket을 동시에 호출했을 경우에 1이 아닌 2, 3, 4, 5 그 이상이 될 수 있다.
 	//멀티스레드에서는 의미가 없다.
 	//InterlockedIncrement16(&pSession->ioRelease.IOCount);
 
@@ -640,6 +585,7 @@ BYTE CLanServer::Start(const WCHAR* ip, SHORT port, INT workerThreadRunNum, INT 
 		return FALSE;
 	}
 
+	//RST 설정
 	linger lingerOpt;
 	lingerOpt.l_onoff = 1;  // 링거옵션 1 : on, 0 : off
 	lingerOpt.l_linger = 0; // RST 보내기 위해 0으로 세팅
@@ -651,15 +597,20 @@ BYTE CLanServer::Start(const WCHAR* ip, SHORT port, INT workerThreadRunNum, INT 
 		return FALSE;
 	}
 
-	mIocpHandle = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, NULL, workerThreadRunNum);
+	//송신버퍼 0설정
+	//INT bufSize = 0;
+	//socklen_t len = sizeof(bufSize);
+	//setsockopt(mListenSocket, SOL_SOCKET, SO_SNDBUF, (const char*)&bufSize, sizeof(bufSize));
 
-	// +1은 AcceptThread
-	//mThreadArr = (HANDLE*)malloc(sizeof(HANDLE) * workerThreadCreateNum + 1);
+	mIocpHandle = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, NULL, workerThreadRunNum);
+	if (mIocpHandle == NULL)
+	{
+		return FALSE;
+	}
 	
 	mThreadArr = new HANDLE[workerThreadCreateNum + 1];
 
 	mMaxClientNum = maxClientNum;
-	
 
 	mSessionArray = new stSESSION[maxClientNum];
 
@@ -694,17 +645,14 @@ VOID CLanServer::Stop()
 
 	for (int clientNum = 0; clientNum < mMaxClientNum; clientNum++)
 	{
-		//if (mSessionArray[clientNum].occupyFlag == false)
-			//continue;
-		//ReleaseSession(&mSessionArray[clientNum]);
 		Disconnect(mSessionArray[clientNum].sessionID);
 	}
 
 	for (;;)
 	{
 		//세션이 전부 반납됨
-		//if (mSessionArrayIndexStack.() == mMaxClientNum)
-			//break;
+		if (mSessionArrayIndexStack.GetUseSize() == mMaxClientNum)
+			break;
 
 		Sleep(100);
 	}
